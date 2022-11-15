@@ -1,13 +1,15 @@
 /**
- * dd-resizable.ts 4.4.0-dev
- * Copyright (c) 2021 Alain Dumesny - see GridStack root license
+ * dd-resizable.ts 7.1.1-dev
+ * Copyright (c) 2021-2022 Alain Dumesny - see GridStack root license
  */
 
 import { DDResizableHandle } from './dd-resizable-handle';
 import { DDBaseImplement, HTMLElementExtendOpt } from './dd-base-impl';
-import { DDUtils } from './dd-utils';
-import { Utils } from '../utils';
-import { DDUIData, Rect, Size } from '../types';
+import { Utils } from './utils';
+import { DDUIData, Rect, Size } from './types';
+import { DDManager } from './dd-manager';
+
+// import { GridItemHTMLElement } from './types'; let count = 0; // TEST
 
 // TODO: merge with DDDragOpt
 export interface DDResizableOpt {
@@ -29,32 +31,35 @@ export class DDResizable extends DDBaseImplement implements HTMLElementExtendOpt
   public option: DDResizableOpt;
 
   /** @internal */
-  private handlers: DDResizableHandle[];
+  protected handlers: DDResizableHandle[];
   /** @internal */
-  private originalRect: Rect;
+  protected originalRect: Rect;
   /** @internal */
-  private temporalRect: Rect;
+  protected temporalRect: Rect;
   /** @internal */
-  private scrollY: number;
+  protected scrollY: number;
   /** @internal */
-  private scrolled: number;
+  protected scrolled: number;
   /** @internal */
-  private scrollEl: HTMLElement;
+  protected scrollEl: HTMLElement;
   /** @internal */
-  private startEvent: MouseEvent;
+  protected startEvent: MouseEvent;
   /** @internal value saved in the same order as _originStyleProp[] */
-  private elOriginStyleVal: string[];
+  protected elOriginStyleVal: string[];
   /** @internal */
-  private parentOriginStylePosition: string;
+  protected parentOriginStylePosition: string;
   /** @internal */
-  private static _originStyleProp = ['width', 'height', 'position', 'left', 'top', 'opacity', 'zIndex'];
+  protected static _originStyleProp = ['width', 'height', 'position', 'left', 'top', 'opacity', 'zIndex'];
 
   constructor(el: HTMLElement, opts: DDResizableOpt = {}) {
     super();
     this.el = el;
     this.option = opts;
+    // create var event binding so we can easily remove and still look like TS methods (unlike anonymous functions)
+    this._mouseOver = this._mouseOver.bind(this);
+    this._mouseOut = this._mouseOut.bind(this);
     this.enable();
-    this._setupAutoHide();
+    this._setupAutoHide(this.option.autoHide);
     this._setupHandlers();
   }
 
@@ -70,20 +75,19 @@ export class DDResizable extends DDBaseImplement implements HTMLElementExtendOpt
     super.enable();
     this.el.classList.add('ui-resizable');
     this.el.classList.remove('ui-resizable-disabled');
+    this._setupAutoHide(this.option.autoHide);
   }
 
   public disable(): void {
     super.disable();
     this.el.classList.add('ui-resizable-disabled');
     this.el.classList.remove('ui-resizable');
+    this._setupAutoHide(false);
   }
 
   public destroy(): void {
     this._removeHandlers();
-    if (this.option.autoHide) {
-      this.el.removeEventListener('mouseover', this._showHandlers);
-      this.el.removeEventListener('mouseout', this._hideHandlers);
-    }
+    this._setupAutoHide(false);
     this.el.classList.remove('ui-resizable');
     delete this.el;
     super.destroy();
@@ -98,38 +102,52 @@ export class DDResizable extends DDBaseImplement implements HTMLElementExtendOpt
       this._setupHandlers();
     }
     if (updateAutoHide) {
-      this._setupAutoHide();
+      this._setupAutoHide(this.option.autoHide);
     }
     return this;
   }
 
-  /** @internal */
-  private _setupAutoHide(): DDResizable {
-    if (this.option.autoHide) {
+  /** @internal turns auto hide on/off */
+  protected _setupAutoHide(auto: boolean): DDResizable {
+    if (auto) {
       this.el.classList.add('ui-resizable-autohide');
-      // use mouseover/mouseout instead of mouseenter/mouseleave to get better performance;
-      this.el.addEventListener('mouseover', this._showHandlers);
-      this.el.addEventListener('mouseout', this._hideHandlers);
+      // use mouseover and not mouseenter to get better performance and track for nested cases
+      this.el.addEventListener('mouseover', this._mouseOver);
+      this.el.addEventListener('mouseout', this._mouseOut);
     } else {
       this.el.classList.remove('ui-resizable-autohide');
-      this.el.removeEventListener('mouseover', this._showHandlers);
-      this.el.removeEventListener('mouseout', this._hideHandlers);
+      this.el.removeEventListener('mouseover', this._mouseOver);
+      this.el.removeEventListener('mouseout', this._mouseOut);
+      if (DDManager.overResizeElement === this) {
+        delete DDManager.overResizeElement;
+      }
     }
     return this;
   }
 
   /** @internal */
-  private _showHandlers = () => {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  protected _mouseOver(e: Event): void {
+    // console.log(`${count++} pre-enter ${(this.el as GridItemHTMLElement).gridstackNode._id}`)
+    // already over a child, ignore. Ideally we just call e.stopPropagation() but see https://github.com/gridstack/gridstack.js/issues/2018
+    if (DDManager.overResizeElement || DDManager.dragElement) return;
+    DDManager.overResizeElement = this;
+    // console.log(`${count++} enter ${(this.el as GridItemHTMLElement).gridstackNode._id}`)
     this.el.classList.remove('ui-resizable-autohide');
   }
 
   /** @internal */
-  private _hideHandlers = () => {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  protected _mouseOut(e: Event): void {
+    // console.log(`${count++} pre-leave ${(this.el as GridItemHTMLElement).gridstackNode._id}`)
+    if (DDManager.overResizeElement !== this) return;
+    delete DDManager.overResizeElement;
+    // console.log(`${count++} leave ${(this.el as GridItemHTMLElement).gridstackNode._id}`)
     this.el.classList.add('ui-resizable-autohide');
   }
 
   /** @internal */
-  private _setupHandlers(): DDResizable {
+  protected _setupHandlers(): DDResizable {
     let handlerDirection = this.option.handles || 'e,s,se';
     if (handlerDirection === 'all') {
       handlerDirection = 'n,e,s,w,se,sw,ne,nw';
@@ -151,7 +169,7 @@ export class DDResizable extends DDBaseImplement implements HTMLElementExtendOpt
   }
 
   /** @internal */
-  private _resizeStart(event: MouseEvent): DDResizable {
+  protected _resizeStart(event: MouseEvent): DDResizable {
     this.originalRect = this.el.getBoundingClientRect();
     this.scrollEl = Utils.getScrollElement(this.el);
     this.scrollY = this.scrollEl.scrollTop;
@@ -159,7 +177,7 @@ export class DDResizable extends DDBaseImplement implements HTMLElementExtendOpt
     this.startEvent = event;
     this._setupHelper();
     this._applyChange();
-    const ev = DDUtils.initEvent<MouseEvent>(event, { type: 'resizestart', target: this.el });
+    const ev = Utils.initEvent<MouseEvent>(event, { type: 'resizestart', target: this.el });
     if (this.option.start) {
       this.option.start(ev, this._ui());
     }
@@ -169,11 +187,11 @@ export class DDResizable extends DDBaseImplement implements HTMLElementExtendOpt
   }
 
   /** @internal */
-  private _resizing(event: MouseEvent, dir: string): DDResizable {
+  protected _resizing(event: MouseEvent, dir: string): DDResizable {
     this.scrolled = this.scrollEl.scrollTop - this.scrollY;
     this.temporalRect = this._getChange(event, dir);
     this._applyChange();
-    const ev = DDUtils.initEvent<MouseEvent>(event, { type: 'resize', target: this.el });
+    const ev = Utils.initEvent<MouseEvent>(event, { type: 'resize', target: this.el });
     if (this.option.resize) {
       this.option.resize(ev, this._ui());
     }
@@ -182,8 +200,8 @@ export class DDResizable extends DDBaseImplement implements HTMLElementExtendOpt
   }
 
   /** @internal */
-  private _resizeStop(event: MouseEvent): DDResizable {
-    const ev = DDUtils.initEvent<MouseEvent>(event, { type: 'resizestop', target: this.el });
+  protected _resizeStop(event: MouseEvent): DDResizable {
+    const ev = Utils.initEvent<MouseEvent>(event, { type: 'resizestop', target: this.el });
     if (this.option.stop) {
       this.option.stop(ev); // Note: ui() not used by gridstack so don't pass
     }
@@ -199,7 +217,7 @@ export class DDResizable extends DDBaseImplement implements HTMLElementExtendOpt
   }
 
   /** @internal */
-  private _setupHelper(): DDResizable {
+  protected _setupHelper(): DDResizable {
     this.elOriginStyleVal = DDResizable._originStyleProp.map(prop => this.el.style[prop]);
     this.parentOriginStylePosition = this.el.parentElement.style.position;
     if (window.getComputedStyle(this.el.parentElement).position.match(/static/)) {
@@ -211,7 +229,7 @@ export class DDResizable extends DDBaseImplement implements HTMLElementExtendOpt
   }
 
   /** @internal */
-  private _cleanHelper(): DDResizable {
+  protected _cleanHelper(): DDResizable {
     DDResizable._originStyleProp.forEach((prop, i) => {
       this.el.style[prop] = this.elOriginStyleVal[i] || null;
     });
@@ -220,7 +238,7 @@ export class DDResizable extends DDBaseImplement implements HTMLElementExtendOpt
   }
 
   /** @internal */
-  private _getChange(event: MouseEvent, dir: string): Rect {
+  protected _getChange(event: MouseEvent, dir: string): Rect {
     const oEvent = this.startEvent;
     const newRect = { // Note: originalRect is a complex object, not a simple Rect, so copy out.
       width: this.originalRect.width,
@@ -228,7 +246,7 @@ export class DDResizable extends DDBaseImplement implements HTMLElementExtendOpt
       left: this.originalRect.left,
       top: this.originalRect.top - this.scrolled
     };
-    
+
     const offsetX = event.clientX - oEvent.clientX;
     const offsetY = event.clientY - oEvent.clientY;
 
@@ -261,7 +279,7 @@ export class DDResizable extends DDBaseImplement implements HTMLElementExtendOpt
   }
 
   /** @internal constrain the size to the set min/max values */
-  private _constrainSize(oWidth: number, oHeight: number): Size {
+  protected _constrainSize(oWidth: number, oHeight: number): Size {
     const maxWidth = this.option.maxWidth || Number.MAX_SAFE_INTEGER;
     const minWidth = this.option.minWidth || oWidth;
     const maxHeight = this.option.maxHeight || Number.MAX_SAFE_INTEGER;
@@ -272,7 +290,7 @@ export class DDResizable extends DDBaseImplement implements HTMLElementExtendOpt
   }
 
   /** @internal */
-  private _applyChange(): DDResizable {
+  protected _applyChange(): DDResizable {
     let containmentRect = { left: 0, top: 0, width: 0, height: 0 };
     if (this.el.style.position === 'absolute') {
       const containmentEl = this.el.parentElement;
@@ -288,14 +306,14 @@ export class DDResizable extends DDBaseImplement implements HTMLElementExtendOpt
   }
 
   /** @internal */
-  private _removeHandlers(): DDResizable {
+  protected _removeHandlers(): DDResizable {
     this.handlers.forEach(handle => handle.destroy());
     delete this.handlers;
     return this;
   }
 
   /** @internal */
-  private _ui = (): DDUIData => {
+  protected _ui = (): DDUIData => {
     const containmentEl = this.el.parentElement;
     const containmentRect = containmentEl.getBoundingClientRect();
     const newRect = { // Note: originalRect is a complex object, not a simple Rect, so copy out.

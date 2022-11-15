@@ -1,10 +1,10 @@
 /**
- * dd-elements.ts 4.4.0-dev
+ * dd-elements.ts 7.1.1-dev
  * Copyright (c) 2021 Alain Dumesny - see GridStack root license
  */
 
 import { DDResizable, DDResizableOpt } from './dd-resizable';
-import { GridItemHTMLElement } from './../types';
+import { GridItemHTMLElement } from './types';
 import { DDDraggable, DDDraggableOpt } from './dd-draggable';
 import { DDDroppable, DDDroppableOpt } from './dd-droppable';
 
